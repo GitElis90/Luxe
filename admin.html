@@ -62,13 +62,15 @@ button.d{border-color:var(--err);color:var(--err)}
     <div class="tabs" id="tabs"></div>
     <div id="list"></div>
   </div>
+  <div class="card"><h2>Orders</h2><button id="refO">Refresh</button><div id="orders"></div></div>
+  <div class="card"><h2>Forms</h2><div id="forms"></div></div>
 </div>
 </div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { getFirestore, collection, addDoc, setDoc, deleteDoc, doc, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { getFirestore, collection, addDoc, setDoc, deleteDoc, doc, getDocs, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 const ADMIN_EMAIL = "daemonhotd67@gmail.com";
 const CLOUD_NAME = "nl17lif3";
@@ -91,6 +93,7 @@ onAuthStateChanged(auth, async u => {
   if (u.email !== ADMIN_EMAIL) { $("gate").textContent = "This account is not the admin."; return; }
   $("gate").classList.add("hidden"); $("app").classList.remove("hidden");
   await load();
+  loadExtra();
 });
 
 async function load(){
@@ -168,6 +171,44 @@ $("save").onclick = async () => {
   } catch (e) { msg.textContent = e.message; }
   $("save").disabled = false;
 };
+
+$("refO").onclick = () => loadExtra();
+async function loadExtra(){
+  const [o, f] = await Promise.all([
+    getDocs(query(collection(db, "orders"), orderBy("createdAt", "desc"))),
+    getDocs(query(collection(db, "forms"), orderBy("createdAt", "desc")))
+  ]);
+  $("orders").innerHTML = o.empty ? '<div class="meta">No orders yet.</div>' : "";
+  o.docs.forEach(d => {
+    const x = d.data(), el = document.createElement("div"); el.className = "item"; el.style.display = "block";
+    el.innerHTML = `<div><strong>@${esc(x.username)}</strong> · ${esc(x.name)} · ${esc(x.email)}</div>
+      <div class="meta">${(x.items || []).map(i => esc(i.catalogue) + ": " + esc((i.caption || "Item").slice(0, 30)) + " (" + esc(i.size) + ", " + esc(i.price) + ")").join("<br>")}</div>
+      <div class="meta">Total ${esc(x.totalGb)} GB · ${esc(x.totalPrice)} · ${esc(x.deviceType)} ${esc(x.deviceSize)} GB (${x.newDevice ? "new device" : "previous device"})</div>
+      <div class="meta">Status: <strong>${esc(x.status)}</strong></div>`;
+    if (x.status === "pending") {
+      const b = document.createElement("button"); b.textContent = "Accept";
+      b.onclick = async () => { await setDoc(doc(db, "orders", d.id), { status: "accepted" }, { merge: true }); loadExtra(); };
+      el.appendChild(b);
+    }
+    if (x.status !== "delivered") {
+      const b = document.createElement("button"); b.className = "p"; b.style.width = "auto"; b.style.marginLeft = "8px"; b.textContent = "Mark delivered";
+      b.onclick = async () => {
+        if (!confirm("Mark this order as delivered?")) return;
+        await setDoc(doc(db, "orders", d.id), { status: "delivered" }, { merge: true });
+        await setDoc(doc(db, "users", x.uid), { status: "delivered" }, { merge: true });
+        loadExtra();
+      };
+      el.appendChild(b);
+    }
+    $("orders").appendChild(el);
+  });
+  $("forms").innerHTML = f.empty ? '<div class="meta">No forms yet.</div>' : "";
+  f.docs.forEach(d => {
+    const x = d.data(), el = document.createElement("div"); el.className = "item"; el.style.display = "block";
+    el.innerHTML = `<div><strong>@${esc(x.username)}</strong></div>` + Object.values(x.answers || {}).filter(a => a.label !== "Confirmed accuracy").map(a => `<div class="meta">${esc(a.label)}: ${esc(a.value)}</div>`).join("");
+    $("forms").appendChild(el);
+  });
+}
 </script>
 </body>
 </html>
