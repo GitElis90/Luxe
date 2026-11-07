@@ -24,6 +24,11 @@ button{font:inherit;cursor:pointer;border-radius:10px;padding:13px 16px;border:1
 .hero{height:180px;border-radius:12px;background:var(--line);display:flex;align-items:center;justify-content:center;color:var(--mute);margin-bottom:16px}
 .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
 .hidden{display:none}
+.tile{display:block;width:100%;text-align:left;padding:22px 18px;font-size:22px;background:var(--card);color:var(--ink);border:1px solid var(--line)}
+.chips{margin:8px 0 4px}.chip{display:inline-block;width:auto;margin:4px 4px 0 0;padding:3px 12px;border-radius:20px;font-size:14px;background:transparent;color:var(--accent)}
+.item{border-top:1px solid var(--line);padding:14px 0}.item img{width:100%;max-height:260px;object-fit:cover;border-radius:10px}
+.meta{color:var(--mute);font-size:14px;margin:4px 0}.rate{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.rate button{width:auto;margin:0;padding:6px 10px;font-size:14px}.rate button.on{background:var(--accent);color:var(--accent-ink)}
 </style>
 </head>
 <body>
@@ -68,12 +73,51 @@ button{font:inherit;cursor:pointer;border-radius:10px;padding:13px 16px;border:1
   </div>
 </div>
 
+<!-- UNLOCK -->
+<div id="unlock" class="hidden">
+  <button class="link" data-back="home">Back</button>
+  <div class="card">
+    <div class="hero">Your picture goes here</div>
+    <h1>Unlock the Experience</h1>
+    <p class="sub">Your details will go here.</p>
+    <button class="primary" id="toForm">Continue</button>
+  </div>
+</div>
+
+<!-- FORM -->
+<div id="form" class="hidden">
+  <button class="link" data-back="unlock">Back</button>
+  <h1>Fill the form</h1>
+  <div class="card">
+    <div id="formFields"></div>
+    <div class="err" id="formErr"></div>
+    <button class="primary" id="submitForm">Submit</button>
+  </div>
+</div>
+
+<!-- CATALOGUE TILES -->
+<div id="tiles" class="hidden">
+  <h1>Choose a catalogue</h1>
+  <button class="tile" data-cat="OF">OF</button>
+  <button class="tile" data-cat="CORE">CORE</button>
+  <button class="tile" data-cat="PRIME">PRIME</button>
+</div>
+
+<!-- ITEMS -->
+<div id="items" class="hidden">
+  <button class="link" data-back="tiles">Back to catalogues</button>
+  <h1 id="catTitle"></h1>
+  <input id="q" placeholder="Search by category">
+  <div class="chips" id="chips"></div>
+  <div id="itemList"></div>
+</div>
+
 </div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, deleteUser } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { getFirestore, doc, getDoc, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc, addDoc, collection, query, where, getDocs, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyB2MXcsqdk7tMrILWHMPiuBXADA1NLLqYY",
@@ -88,7 +132,7 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 const $ = id => document.getElementById(id);
-const show = id => { for (const s of ["loading","auth","home"]) $(s).classList.toggle("hidden", s !== id); };
+const show = id => { for (const s of ["loading","auth","home","unlock","form","tiles","items"]) $(s).classList.toggle("hidden", s !== id); };
 let signup = false;
 let creating = false; // true while signup is writing the profile
 
@@ -160,8 +204,78 @@ onAuthStateChanged(auth, async user => {
 });
 
 $("logout").onclick = () => signOut(auth);
-$("unlockBtn").onclick = () => { $("homeMsg").textContent = "Coming in the next step."; };
+
 $("supportBtn").onclick = () => { $("homeMsg").textContent = "Support chat comes in a later step."; };
+
+// ===== Part 1: unlock, form, catalogues, search, ratings =====
+const FORM_FIELDS = [ // change these when you send your real form fields
+  { id: "f1", label: "Field 1 (placeholder)", required: true },
+  { id: "f2", label: "Field 2 (placeholder)", required: false }
+];
+const LABELS = ["Worst", "Bad", "Fine", "Great", "Goated"];
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let curCat = "", curItems = [], ratings = [];
+
+document.querySelectorAll("[data-back]").forEach(b => b.onclick = () => show(b.dataset.back));
+$("unlockBtn").onclick = () => show("unlock");
+$("toForm").onclick = () => {
+  $("formFields").innerHTML = FORM_FIELDS.map(f => `<label for="${f.id}">${esc(f.label)}${f.required ? " *" : ""}</label><input id="${f.id}">`).join("");
+  $("formErr").textContent = ""; show("form");
+};
+$("submitForm").onclick = async () => {
+  const answers = {};
+  for (const f of FORM_FIELDS) {
+    const v = $(f.id).value.trim();
+    if (f.required && !v) { $("formErr").textContent = "Please fill: " + f.label; return; }
+    answers[f.id] = { label: f.label, value: v };
+  }
+  $("submitForm").disabled = true;
+  try {
+    const u = auth.currentUser, p = (await getDoc(doc(db, "users", u.uid))).data() || {};
+    await addDoc(collection(db, "forms"), { uid: u.uid, username: p.username || "", name: p.name || "", email: u.email, answers, createdAt: serverTimestamp() });
+    show("tiles");
+  } catch (e) { $("formErr").textContent = "Could not submit. Try again."; }
+  $("submitForm").disabled = false;
+};
+
+document.querySelectorAll("[data-cat]").forEach(b => b.onclick = async () => {
+  curCat = b.dataset.cat; $("catTitle").textContent = curCat; $("q").value = "";
+  $("itemList").textContent = "Loading…"; show("items");
+  const [i, r] = await Promise.all([
+    getDocs(query(collection(db, "items"), where("catalogue", "==", curCat))),
+    getDocs(query(collection(db, "ratings"), where("catalogue", "==", curCat)))
+  ]);
+  curItems = i.docs.map(d => ({ id: d.id, ...d.data() }));
+  ratings = r.docs.map(d => d.data());
+  renderItems();
+});
+$("q").oninput = renderItems;
+
+function renderItems(){
+  const q = $("q").value.trim().toLowerCase();
+  const all = [...new Set(curItems.flatMap(i => i.categories || []))].sort();
+  $("chips").innerHTML = all.filter(c => c.includes(q) && c !== q).map(c => `<button class="chip">${esc(c)}</button>`).join("");
+  $("chips").querySelectorAll(".chip").forEach(b => b.onclick = () => { $("q").value = b.textContent; renderItems(); });
+  const uid = auth.currentUser.uid;
+  const list = curItems.filter(i => !q || (i.categories || []).some(c => c.includes(q)));
+  $("itemList").innerHTML = list.length ? "" : '<div class="meta">Nothing found.</div>';
+  list.forEach(i => {
+    const rs = ratings.filter(r => r.itemId === i.id), mine = rs.find(r => r.uid === uid);
+    const el = document.createElement("div"); el.className = "item";
+    el.innerHTML = (i.photoUrl ? `<img src="${esc(i.photoUrl)}" alt="">` : "") +
+      (i.caption ? `<p>${esc(i.caption)}</p>` : "") +
+      `<div class="meta">${esc(i.duration)} · ${esc(i.size)} · ${esc(i.price)}</div>` +
+      `<div class="meta">${(i.categories || []).map(esc).join(", ")}</div>` +
+      `<div class="rate">${LABELS.map((l, n) => `<button data-n="${n}" class="${mine && mine.value === n ? "on" : ""}">${l} ${rs.filter(r => r.value === n).length}</button>`).join("")}</div>`;
+    el.querySelectorAll(".rate button").forEach(b => b.onclick = async () => {
+      const value = +b.dataset.n;
+      await setDoc(doc(db, "ratings", i.id + "_" + uid), { itemId: i.id, catalogue: curCat, uid, value });
+      ratings = ratings.filter(r => !(r.itemId === i.id && r.uid === uid)).concat({ itemId: i.id, catalogue: curCat, uid, value });
+      renderItems();
+    });
+    $("itemList").appendChild(el);
+  });
+}
 </script>
 </body>
 </html>
