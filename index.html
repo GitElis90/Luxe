@@ -37,6 +37,7 @@ body{padding-bottom:80px}
 .bar{position:fixed;left:0;right:0;bottom:0;padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));background:var(--accent);color:var(--accent-ink);display:flex;justify-content:space-between;align-items:center;cursor:pointer;z-index:5}
 .bar b{font-weight:normal}
 .bar.hidden{display:none}
+.sdot{color:#e5484d}
 .notice{background:var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
 .sz{display:grid;grid-template-columns:1fr 1fr;gap:10px}.sz button{margin:0}
 .row2{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
@@ -86,7 +87,7 @@ body{padding-bottom:80px}
     </div>
     <div id="orderMsg" class="hidden"></div>
     <button class="primary" id="unlockBtn">Unlock the Experience</button>
-    <button class="ghost" id="supportBtn">Contact support</button>
+    <button class="ghost" id="supportBtn">Contact support<span class="sdot hidden"> ●</span></button>
     <div class="err" id="homeMsg" style="color:var(--mute)"></div>
   </div>
 </div>
@@ -218,7 +219,7 @@ body{padding-bottom:80px}
   <h1>Order placed</h1>
   <div class="card">
     <p>Your order has been received. Contact our Support Team about your storage device, pricing and delivery.</p>
-    <button class="primary" id="doneSupport">Support</button>
+    <button class="primary" id="doneSupport">Support<span class="sdot hidden"> ●</span></button>
     <button class="ghost" id="doneHome">Go to Home</button>
     <div class="err" id="doneMsg" style="color:var(--mute)"></div>
   </div>
@@ -245,9 +246,10 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-var curScreen = "", lock = "none", unsubChat = null, meProfile = {};
+var curScreen = "", lock = "none", unsubChat = null, meProfile = {}, popping = false, replaceNext = false, unsubDot = null, dotOn = false;
 const $ = id => document.getElementById(id);
-const show = id => { if (id !== "support" && unsubChat) { unsubChat(); unsubChat = null; } if (lock === "in_progress" && !["home","loading","auth","done","support"].includes(id)) id = "home"; for (const s of ["loading","auth","home","unlock","form","tiles","items","cart","device","sizes","reuse","final","done","support"]) $(s).classList.toggle("hidden", s !== id); curScreen = id; updateBar(); window.scrollTo(0, 0); };
+const show = id => { if (id !== "support" && unsubChat) { unsubChat(); unsubChat = null; } if (lock === "in_progress" && !["home","loading","auth","done","support"].includes(id)) id = "home"; for (const s of ["loading","auth","home","unlock","form","tiles","items","cart","device","sizes","reuse","final","done","support"]) $(s).classList.toggle("hidden", s !== id); if (!popping && id !== curScreen && id !== "loading" && id !== "auth") { if (replaceNext) history.replaceState({ s: id }, "", location.href); else history.pushState({ s: id }, "", location.href); replaceNext = false; }
+ curScreen = id; updateBar(); window.scrollTo(0, 0); };
 let signup = false;
 let creating = false; // true while signup is writing the profile
 
@@ -307,7 +309,7 @@ $("authBtn").onclick = async () => {
 async function loadHome(user){
   const snap = await getDoc(doc(db, "users", user.uid));
   const d = snap.exists() ? snap.data() : { name: "there", username: "", status: "none" };
-  meProfile = d;
+  meProfile = d; watchDot(user.uid);
   $("hello").textContent = "Hi, " + d.name;
   $("uname").textContent = d.username ? "@" + d.username : "";
   const m = $("orderMsg");
@@ -324,13 +326,20 @@ async function loadHome(user){
   }
   show("home");
 }
-addEventListener("popstate", () => {
-  if (lock === "in_progress" || curScreen === "done") { history.pushState({}, "", location.href); if (auth.currentUser) loadHome(auth.currentUser); }
+addEventListener("popstate", e => {
+  if (lock === "in_progress" || curScreen === "done") { history.pushState({ s: "home" }, "", location.href); if (auth.currentUser) loadHome(auth.currentUser); return; }
+  if (!auth.currentUser) return;
+  const st = e.state;
+  if (!st || !st.s) { popping = true; show("home"); popping = false; return; }
+  if (st.s === curScreen) return;
+  popping = true;
+  if (st.s === "cart") openCart(); else if (st.s === "items") { renderItems(); show("items"); } else show(st.s);
+  popping = false;
 });
 
 onAuthStateChanged(auth, async user => {
   if (creating) return;
-  if (!user) { show("auth"); return; }
+  if (!user) { if (unsubDot) { unsubDot(); unsubDot = null; } show("auth"); return; }
   try { await loadHome(user); } catch (e) { show("auth"); $("authErr").textContent = "Could not load your profile. Check Firestore rules."; }
 });
 
@@ -393,7 +402,7 @@ $("submitForm").onclick = async () => {
   try {
     const u = auth.currentUser, p = (await getDoc(doc(db, "users", u.uid))).data() || {};
     await addDoc(collection(db, "forms"), { uid: u.uid, username: p.username || "", name: p.name || "", email: u.email, answers, createdAt: serverTimestamp() });
-    show("tiles");
+    replaceNext = true; show("tiles");
   } catch (e) { $("formErr").textContent = "Could not submit. Try again."; }
   $("submitForm").disabled = false;
 };
@@ -443,6 +452,7 @@ function renderItems(){
 }
 
 // ===== Part 2: cart, device choice, finalize =====
+const DEVICE_NOTICE = `<div class="notice" style="margin-top:14px"><p>An SD Card or Pen Drive is required for physical content delivery. Customers must pay the storage device cost in advance, before order processing begins, if purchasing through LuxeFlow. Alternatively, you may arrange your own compatible storage device.</p><p style="margin:0">To learn more about device pricing, purchasing options, and delivery arrangements, please contact our Support Team after placing your order.</p></div>`;
 const SIZES = [4, 8, 16, 32, 64, 128, 256, 512, 1024];
 let cart = [], flow = { type: "", size: 0, newDevice: true }, prof = {};
 const num = v => parseFloat(String(v).replace(/[^0-9.]/g, "")) || 0;
@@ -507,7 +517,7 @@ function openFinal(){
   $("finalInfo").innerHTML = `<div class="row2"><span>Items</span><strong>${cart.length}</strong></div>
     <div class="row2"><span>Total size</span><strong>${fmtGb(t.gb)}</strong></div>
     <div class="row2"><span>Total cost</span><strong>${money(t.price)}</strong></div>
-    <div class="row2"><span>Storage</span><strong>${esc(flow.type)} · ${fmtSize(flow.size)} (${flow.newDevice ? "new" : "your previous one"})</strong></div>`;
+    <div class="row2"><span>Storage</span><strong>${esc(flow.type)} · ${fmtSize(flow.size)} (${flow.newDevice ? "new" : "your previous one"})</strong></div>` + (flow.newDevice ? DEVICE_NOTICE : "");
   $("finalErr").textContent = ""; show("final");
 }
 $("finalBtn").onclick = async () => {
@@ -530,12 +540,22 @@ $("doneSupport").onclick = () => openSupport();
 function openSupport(){
   const uid = auth.currentUser.uid;
   show("support");
+  setDoc(doc(db, "chats", uid), { userUnread: false }, { merge: true }).catch(() => {});
   if (unsubChat) unsubChat();
   unsubChat = onSnapshot(query(collection(db, "chats", uid, "messages"), orderBy("createdAt")), snap => {
     const box = $("msgs");
     box.innerHTML = snap.empty ? '<div class="meta">Write your question and we will reply here.</div>' : "";
     snap.docs.forEach(d => { const x = d.data(), b = document.createElement("div"); b.className = "b" + (x.from === "user" ? " me" : ""); b.textContent = x.text; box.appendChild(b); });
     box.scrollTop = box.scrollHeight;
+    const last = snap.docs[snap.docs.length - 1];
+    if (dotOn && last && last.data().from === "admin") setDoc(doc(db, "chats", uid), { userUnread: false }, { merge: true }).catch(() => {});
+  });
+}
+function watchDot(uid){
+  if (unsubDot) unsubDot();
+  unsubDot = onSnapshot(doc(db, "chats", uid), sn => {
+    dotOn = !!(sn.exists() && sn.data().userUnread);
+    document.querySelectorAll(".sdot").forEach(el => el.classList.toggle("hidden", !dotOn));
   });
 }
 $("msgSend").onclick = async () => {
