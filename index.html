@@ -36,6 +36,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 body{padding-bottom:80px}
 .bar{position:fixed;left:0;right:0;bottom:0;padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));background:var(--accent);color:var(--accent-ink);display:flex;justify-content:space-between;align-items:center;cursor:pointer;z-index:5}
 .bar b{font-weight:normal}
+.bar.hidden{display:none}
 .sz{display:grid;grid-template-columns:1fr 1fr;gap:10px}.sz button{margin:0}
 .row2{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
 </style>
@@ -431,7 +432,7 @@ function updateBar(){
 $("bar").onclick = openCart;
 
 function openCart(){
-  if (!cart.length) { show("tiles"); return; }
+  if (!cart.length) { show("home"); return; }
   $("cartList").innerHTML = "";
   cart.forEach(i => {
     const r = document.createElement("div"); r.className = "row2"; r.style.alignItems = "center";
