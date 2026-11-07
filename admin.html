@@ -52,6 +52,8 @@ button.d{border-color:var(--err);color:var(--err)}
     <label for="cats">Categories (comma separated)</label>
     <input id="cats" placeholder="western, action">
     <div class="chips" id="chips"></div>
+    <label for="plink">Private link (only you can see it)</label>
+    <input id="plink" type="url" placeholder="https://...">
     <div class="msg" id="msg"></div>
     <button class="p" id="save">Save item</button>
     <button id="cancel" class="hidden">Cancel edit</button>
@@ -70,7 +72,7 @@ button.d{border-color:var(--err);color:var(--err)}
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { getFirestore, collection, addDoc, setDoc, deleteDoc, doc, getDocs, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { getFirestore, collection, addDoc, setDoc, deleteDoc, doc, getDoc, getDocs, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 const ADMIN_EMAIL = "daemonhotd67@gmail.com";
 const CLOUD_NAME = "nl17lif3";
@@ -115,7 +117,7 @@ function render(){
        <div class="meta">${(i.categories||[]).map(esc).join(", ")}</div>
        <button data-e>Edit</button> <button class="d" data-d>Delete</button></div>`;
     el.querySelector("[data-e]").onclick = () => startEdit(i);
-    el.querySelector("[data-d]").onclick = async () => { if (confirm("Delete this item?")) { await deleteDoc(doc(db,"items",i.id)); await load(); } };
+    el.querySelector("[data-d]").onclick = async () => { if (confirm("Delete this item?")) { await deleteDoc(doc(db,"items",i.id)); await deleteDoc(doc(db,"itemLinks",i.id)).catch(() => {}); await load(); } };
     $("list").appendChild(el);
   });
   const all = [...new Set(items.flatMap(i => i.categories || []))].sort();
@@ -135,13 +137,15 @@ function startEdit(i){
   $("cat").value = i.catalogue; $("caption").value = i.caption || "";
   $("duration").value = i.duration; $("size").value = i.size; $("price").value = i.price;
   $("cats").value = (i.categories || []).join(", ");
+  $("plink").value = "";
+  getDoc(doc(db, "itemLinks", i.id)).then(x => { if (x.exists()) $("plink").value = x.data().link || ""; }).catch(() => {});
   $("cancel").classList.remove("hidden");
   $("msg").textContent = "Leave the photo empty to keep the current one.";
   scrollTo({ top: 0, behavior: "smooth" });
 }
 function reset(){
   editing = null; $("formTitle").textContent = "Add item";
-  ["caption","duration","size","price","cats"].forEach(k => $(k).value = "");
+  ["caption","duration","size","price","cats","plink"].forEach(k => $(k).value = "");
   $("photo").value = ""; $("cancel").classList.add("hidden"); $("msg").textContent = "";
 }
 $("cancel").onclick = reset;
@@ -165,8 +169,12 @@ $("save").onclick = async () => {
     const f = $("photo").files[0];
     if (f) photoUrl = await upload(f);
     const data = { catalogue: $("cat").value, caption: $("caption").value.trim(), duration, size, price, categories, photoUrl };
-    if (editing) await setDoc(doc(db, "items", editing.id), data, { merge: true });
-    else await addDoc(collection(db, "items"), { ...data, createdAt: serverTimestamp() });
+    let itemId;
+    if (editing) { itemId = editing.id; await setDoc(doc(db, "items", itemId), data, { merge: true }); }
+    else { itemId = (await addDoc(collection(db, "items"), { ...data, createdAt: serverTimestamp() })).id; }
+    const link = $("plink").value.trim();
+    if (link) await setDoc(doc(db, "itemLinks", itemId), { link });
+    else await deleteDoc(doc(db, "itemLinks", itemId)).catch(() => {});
     tab = data.catalogue; reset(); await load(); msg.textContent = "Saved.";
   } catch (e) { msg.textContent = e.message; }
   $("save").disabled = false;
@@ -174,15 +182,17 @@ $("save").onclick = async () => {
 
 $("refO").onclick = () => loadExtra();
 async function loadExtra(){
-  const [o, f] = await Promise.all([
+  const [o, f, l] = await Promise.all([
     getDocs(query(collection(db, "orders"), orderBy("createdAt", "desc"))),
-    getDocs(query(collection(db, "forms"), orderBy("createdAt", "desc")))
+    getDocs(query(collection(db, "forms"), orderBy("createdAt", "desc"))),
+    getDocs(collection(db, "itemLinks"))
   ]);
+  const links = {}; l.docs.forEach(d => links[d.id] = d.data().link);
   $("orders").innerHTML = o.empty ? '<div class="meta">No orders yet.</div>' : "";
   o.docs.forEach(d => {
     const x = d.data(), el = document.createElement("div"); el.className = "item"; el.style.display = "block";
     el.innerHTML = `<div><strong>@${esc(x.username)}</strong> · ${esc(x.name)} · ${esc(x.email)}</div>
-      <div class="meta">${(x.items || []).map(i => esc(i.catalogue) + ": " + esc((i.caption || "Item").slice(0, 30)) + " (" + esc(i.size) + ", " + esc(i.price) + ")").join("<br>")}</div>
+      <div class="meta">${(x.items || []).map(i => esc(i.catalogue) + ": " + esc((i.caption || "Item").slice(0, 30)) + " (" + esc(i.size) + ", " + esc(i.price) + ")" + (/^https?:\/\//i.test(links[i.id] || "") ? ` · <a href="${esc(links[i.id])}" target="_blank" rel="noopener">Open link</a>` : "")).join("<br>")}</div>
       <div class="meta">Total ${esc(x.totalGb)} GB · ${esc(x.totalPrice)} · ${esc(x.deviceType)} ${esc(x.deviceSize)} GB (${x.newDevice ? "new device" : "previous device"})</div>
       <div class="meta">Status: <strong>${esc(x.status)}</strong></div>`;
     if (x.status === "pending") {
