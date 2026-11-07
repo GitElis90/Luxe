@@ -68,7 +68,7 @@ button.d{border-color:var(--err);color:var(--err)}
   <div class="card"><h2>Support chats</h2>
     <div id="chatList"></div>
     <div id="chatThread" class="hidden">
-      <button id="chatBack">Back to chats</button> <strong id="chatWho"></strong>
+      <button id="chatBack">Back to chats</button> <button class="d" id="chatDel">Delete chat</button> <strong id="chatWho"></strong>
       <div id="chatMsgs" style="display:flex;flex-direction:column;gap:8px;max-height:50vh;overflow:auto;margin:12px 0"></div>
       <input id="chatIn" placeholder="Write a reply" maxlength="1000">
       <button class="p" id="chatSend">Send reply</button>
@@ -221,12 +221,23 @@ async function loadExtra(){
       };
       el.appendChild(b);
     }
+    const del = document.createElement("button"); del.className = "d"; del.style.marginLeft = "8px"; del.textContent = "Delete";
+    del.onclick = async () => {
+      if (!confirm("Delete this order?" + (x.status !== "delivered" ? " The user will be unlocked and can order again." : ""))) return;
+      await deleteDoc(doc(db, "orders", d.id));
+      if (x.status !== "delivered") await setDoc(doc(db, "users", x.uid), { status: "none" }, { merge: true });
+      loadExtra();
+    };
+    el.appendChild(del);
     $("orders").appendChild(el);
   });
   $("forms").innerHTML = f.empty ? '<div class="meta">No forms yet.</div>' : "";
   f.docs.forEach(d => {
     const x = d.data(), el = document.createElement("div"); el.className = "item"; el.style.display = "block";
     el.innerHTML = `<div><strong>@${esc(x.username)}</strong></div>` + Object.values(x.answers || {}).filter(a => a.label !== "Confirmed accuracy").map(a => `<div class="meta">${esc(a.label)}: ${esc(a.value)}</div>`).join("");
+    const del = document.createElement("button"); del.className = "d"; del.textContent = "Delete";
+    del.onclick = async () => { if (!confirm("Delete this form?")) return; await deleteDoc(doc(db, "forms", d.id)); loadExtra(); };
+    el.appendChild(del);
     $("forms").appendChild(el);
   });
 }
@@ -260,8 +271,15 @@ $("chatSend").onclick = async () => {
   $("chatIn").value = "";
   try {
     await addDoc(collection(db, "chats", openUid, "messages"), { from: "admin", text: t.slice(0, 1000), createdAt: serverTimestamp() });
-    await setDoc(doc(db, "chats", openUid), { lastAt: serverTimestamp(), lastFrom: "admin" }, { merge: true });
+    await setDoc(doc(db, "chats", openUid), { lastAt: serverTimestamp(), lastFrom: "admin", userUnread: true }, { merge: true });
   } catch (e) { $("chatIn").value = t; }
+};
+$("chatDel").onclick = async () => {
+  if (!openUid || !confirm("Delete this whole chat?")) return;
+  const uid = openUid; $("chatBack").click();
+  const ms = await getDocs(collection(db, "chats", uid, "messages"));
+  await Promise.all(ms.docs.map(m => deleteDoc(m.ref)));
+  await deleteDoc(doc(db, "chats", uid));
 };
 $("chatIn").onkeydown = e => { if (e.key === "Enter") $("chatSend").click(); };
 </script>
