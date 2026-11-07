@@ -259,7 +259,7 @@ let confirmed = false;
 function formError(){
   for (const f of FORM_FIELDS) {
     if (f.type === "confirm") { if (!confirmed) return "Tap the confirmation to continue."; continue; }
-    const v = $(f.id).value.trim();
+    const v = $("ff_" + f.id).value.trim();
     if (!v) return "Please fill: " + f.label;
     if (f.type === "email" && !/^\S+@\S+\.\S+$/.test(v)) return "Enter a valid email address.";
     if (f.type === "yesno" && v === "No") return "You must be 18 or older to continue.";
@@ -271,10 +271,10 @@ $("toForm").onclick = () => {
   confirmed = false;
   $("formFields").innerHTML = FORM_FIELDS.map(f => {
     if (f.type === "confirm") return `<button type="button" class="chk" id="confirm" aria-pressed="false" style="margin-top:18px">○ ${esc(f.label)}</button>`;
-    if (f.type === "yesno") return `<label for="${f.id}">${esc(f.label)}</label><select id="${f.id}" style="width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit"><option value="">Select</option><option>Yes</option><option>No</option></select>`;
-    return `<label for="${f.id}">${esc(f.label)}</label><input id="${f.id}" type="${f.type}">`;
+    if (f.type === "yesno") return `<label for="ff_${f.id}">${esc(f.label)}</label><select id="ff_${f.id}" style="width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit"><option value="">Select</option><option>Yes</option><option>No</option></select>`;
+    return `<label for="ff_${f.id}">${esc(f.label)}</label><input id="ff_${f.id}" type="${f.type}">`;
   }).join("");
-  $("email").value = auth.currentUser.email || "";
+  $("ff_email").value = auth.currentUser.email || "";
   $("formFields").querySelectorAll("input,select").forEach(el => { el.oninput = refreshSubmit; el.onchange = refreshSubmit; });
   $("confirm").onclick = () => {
     confirmed = !confirmed;
@@ -289,7 +289,7 @@ $("submitForm").onclick = async () => {
   const msg = formError();
   if (msg) { $("formErr").textContent = msg; return; }
   const answers = {};
-  for (const f of FORM_FIELDS) answers[f.id] = { label: f.type === "confirm" ? "Confirmed accuracy" : f.label, value: f.type === "confirm" ? "yes" : $(f.id).value.trim() };
+  for (const f of FORM_FIELDS) answers[f.id] = { label: f.type === "confirm" ? "Confirmed accuracy" : f.label, value: f.type === "confirm" ? "yes" : $("ff_" + f.id).value.trim() };
   $("submitForm").disabled = true;
   try {
     const u = auth.currentUser, p = (await getDoc(doc(db, "users", u.uid))).data() || {};
