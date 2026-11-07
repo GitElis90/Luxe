@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Luxe</title>
+<style>
+:root{--bg:#f6f4f7;--card:#fff;--ink:#1d1a24;--mute:#6b6676;--line:#e4e0ea;--accent:#5b2a86;--accent-ink:#fff;--err:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#14111a;--card:#1e1a27;--ink:#f1eef6;--mute:#a49eb3;--line:#322c3f;--accent:#b48be0;--accent-ink:#14111a;--err:#ff8a80}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Georgia,"Times New Roman",serif;min-height:100vh}
+.wrap{max-width:440px;margin:0 auto;padding:24px 18px}
+h1{font-size:28px;margin:8px 0 4px}
+p.sub{color:var(--mute);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px}
+label{display:block;font-size:14px;color:var(--mute);margin:14px 0 4px}
+input{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit}
+input:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button{font:inherit;cursor:pointer;border-radius:10px;padding:13px 16px;border:1px solid var(--accent);width:100%;margin-top:14px}
+.primary{background:var(--accent);color:var(--accent-ink)}
+.ghost{background:transparent;color:var(--accent)}
+.link{background:none;border:none;color:var(--accent);width:auto;padding:4px;margin-top:10px;text-decoration:underline}
+.err{color:var(--err);min-height:20px;font-size:14px;margin-top:10px}
+.hero{height:180px;border-radius:12px;background:var(--line);display:flex;align-items:center;justify-content:center;color:var(--mute);margin-bottom:16px}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div id="loading" class="card">Loading…</div>
+
+<!-- AUTH -->
+<div id="auth" class="hidden">
+  <h1 id="authTitle">Welcome back</h1>
+  <p class="sub" id="authSub">Log in with your email.</p>
+  <div class="card">
+    <div id="signupFields" class="hidden">
+      <label for="name">Name</label>
+      <input id="name" autocomplete="name">
+      <label for="username">Username (unique)</label>
+      <input id="username" autocapitalize="none" autocomplete="off" placeholder="letters, numbers, _ (3–20)">
+    </div>
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="email">
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" placeholder="at least 6 characters">
+    <div class="err" id="authErr"></div>
+    <button class="primary" id="authBtn">Log in</button>
+    <button class="link" id="toggle">New here? Create an account</button>
+  </div>
+</div>
+
+<!-- HOME -->
+<div id="home" class="hidden">
+  <div class="top">
+    <div><strong id="hello"></strong><div class="sub" id="uname" style="color:var(--mute);font-size:14px"></div></div>
+    <button class="link" id="logout">Log out</button>
+  </div>
+  <div class="card">
+    <div class="hero">Your picture goes here</div>
+    <h1>Your title here</h1>
+    <p class="sub">Your details will go here.</p>
+    <button class="primary" id="unlockBtn">Unlock the Experience</button>
+    <button class="ghost" id="supportBtn">Contact support</button>
+    <div class="err" id="homeMsg" style="color:var(--mute)"></div>
+  </div>
+</div>
+
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, deleteUser } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { getFirestore, doc, getDoc, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyB2MXcsqdk7tMrILWHMPiuBXADA1NLLqYY",
+  authDomain: "luxe-5be48.firebaseapp.com",
+  projectId: "luxe-5be48",
+  storageBucket: "luxe-5be48.firebasestorage.app",
+  messagingSenderId: "285202599477",
+  appId: "1:285202599477:web:02efbc6d056a91907e2b7c"
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const $ = id => document.getElementById(id);
+const show = id => { for (const s of ["loading","auth","home"]) $(s).classList.toggle("hidden", s !== id); };
+let signup = false;
+let creating = false; // true while signup is writing the profile
+
+$("toggle").onclick = () => {
+  signup = !signup;
+  $("signupFields").classList.toggle("hidden", !signup);
+  $("authTitle").textContent = signup ? "Create your account" : "Welcome back";
+  $("authSub").textContent = signup ? "Choose a name and a unique username." : "Log in with your email.";
+  $("authBtn").textContent = signup ? "Create account" : "Log in";
+  $("toggle").textContent = signup ? "Already have an account? Log in" : "New here? Create an account";
+  $("authErr").textContent = "";
+};
+
+function friendly(e){
+  const c = e.code || "";
+  if (c.includes("email-already")) return "That email already has an account. Log in instead.";
+  if (c.includes("invalid-email")) return "Enter a valid email address.";
+  if (c.includes("weak-password")) return "Password must be at least 6 characters.";
+  if (c.includes("invalid-credential") || c.includes("wrong-password") || c.includes("user-not-found")) return "Email or password is wrong.";
+  if (c.includes("too-many")) return "Too many tries. Wait a minute and try again.";
+  return e.message || "Something went wrong. Try again.";
+}
+
+$("authBtn").onclick = async () => {
+  const err = $("authErr"); err.textContent = "";
+  const email = $("email").value.trim(), pw = $("password").value;
+  $("authBtn").disabled = true;
+  try {
+    if (!signup) {
+      await signInWithEmailAndPassword(auth, email, pw);
+    } else {
+      const name = $("name").value.trim();
+      const uname = $("username").value.trim().toLowerCase();
+      if (!name) throw { message: "Enter your name." };
+      if (!/^[a-z0-9_]{3,20}$/.test(uname)) throw { message: "Username: 3–20 letters, numbers or underscore." };
+      creating = true;
+      const cred = await createUserWithEmailAndPassword(auth, email, pw);
+      try {
+        await runTransaction(db, async tx => {
+          const uref = doc(db, "usernames", uname);
+          if ((await tx.get(uref)).exists()) throw { message: "That username is taken. Pick another." };
+          tx.set(uref, { uid: cred.user.uid });
+          tx.set(doc(db, "users", cred.user.uid), { name, username: uname, status: "none", orders: 0, createdAt: serverTimestamp() });
+        });
+      } catch (e) {
+        await deleteUser(cred.user).catch(() => {});
+        creating = false;
+        throw e;
+      }
+      creating = false;
+      await loadHome(cred.user);
+    }
+  } catch (e) { creating = false; err.textContent = friendly(e); }
+  $("authBtn").disabled = false;
+};
+
+async function loadHome(user){
+  const snap = await getDoc(doc(db, "users", user.uid));
+  const d = snap.exists() ? snap.data() : { name: "there", username: "" };
+  $("hello").textContent = "Hi, " + d.name;
+  $("uname").textContent = d.username ? "@" + d.username : "";
+  show("home");
+}
+
+onAuthStateChanged(auth, async user => {
+  if (creating) return;
+  if (!user) { show("auth"); return; }
+  try { await loadHome(user); } catch (e) { show("auth"); $("authErr").textContent = "Could not load your profile. Check Firestore rules."; }
+});
+
+$("logout").onclick = () => signOut(auth);
+$("unlockBtn").onclick = () => { $("homeMsg").textContent = "Coming in the next step."; };
+$("supportBtn").onclick = () => { $("homeMsg").textContent = "Support chat comes in a later step."; };
+</script>
+</body>
+</html>
