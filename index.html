@@ -40,6 +40,7 @@ body{padding-bottom:80px}
 .notice{background:var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
 .sz{display:grid;grid-template-columns:1fr 1fr;gap:10px}.sz button{margin:0}
 .row2{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.b{max-width:80%;padding:8px 12px;border-radius:12px;background:var(--line);overflow-wrap:anywhere}.b.me{align-self:flex-end;background:var(--accent);color:var(--accent-ink)}
 </style>
 </head>
 <body>
@@ -152,6 +153,17 @@ body{padding-bottom:80px}
   <div id="itemList"></div>
 </div>
 
+<!-- SUPPORT -->
+<div id="support" class="hidden">
+  <button class="link" data-back="home">Back</button>
+  <h1>Support</h1>
+  <div class="card">
+    <div id="msgs" style="display:flex;flex-direction:column;gap:8px;max-height:50vh;overflow:auto;margin-bottom:12px"></div>
+    <input id="msgIn" placeholder="Write your message" maxlength="1000">
+    <button class="primary" id="msgSend">Send</button>
+  </div>
+</div>
+
 <!-- CART -->
 <div id="cart" class="hidden">
   <button class="link" data-back="tiles">Keep browsing</button>
@@ -219,7 +231,7 @@ body{padding-bottom:80px}
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, deleteUser } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc, addDoc, collection, query, where, getDocs, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc, addDoc, collection, query, where, orderBy, onSnapshot, getDocs, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyB2MXcsqdk7tMrILWHMPiuBXADA1NLLqYY",
@@ -233,9 +245,9 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-var curScreen = "", lock = "none";
+var curScreen = "", lock = "none", unsubChat = null, meProfile = {};
 const $ = id => document.getElementById(id);
-const show = id => { if (lock === "in_progress" && !["home","loading","auth","done"].includes(id)) id = "home"; for (const s of ["loading","auth","home","unlock","form","tiles","items","cart","device","sizes","reuse","final","done"]) $(s).classList.toggle("hidden", s !== id); curScreen = id; updateBar(); window.scrollTo(0, 0); };
+const show = id => { if (id !== "support" && unsubChat) { unsubChat(); unsubChat = null; } if (lock === "in_progress" && !["home","loading","auth","done","support"].includes(id)) id = "home"; for (const s of ["loading","auth","home","unlock","form","tiles","items","cart","device","sizes","reuse","final","done","support"]) $(s).classList.toggle("hidden", s !== id); curScreen = id; updateBar(); window.scrollTo(0, 0); };
 let signup = false;
 let creating = false; // true while signup is writing the profile
 
@@ -295,6 +307,7 @@ $("authBtn").onclick = async () => {
 async function loadHome(user){
   const snap = await getDoc(doc(db, "users", user.uid));
   const d = snap.exists() ? snap.data() : { name: "there", username: "", status: "none" };
+  meProfile = d;
   $("hello").textContent = "Hi, " + d.name;
   $("uname").textContent = d.username ? "@" + d.username : "";
   const m = $("orderMsg");
@@ -323,7 +336,7 @@ onAuthStateChanged(auth, async user => {
 
 $("logout").onclick = () => signOut(auth);
 
-$("supportBtn").onclick = () => { $("homeMsg").textContent = "Support chat comes in a later step."; };
+$("supportBtn").onclick = () => openSupport();
 
 // ===== Part 1: unlock, form, catalogues, search, ratings =====
 const FORM_FIELDS = [
@@ -513,7 +526,27 @@ $("finalBtn").onclick = async () => {
   } catch (e) { $("finalErr").textContent = "Could not place the order. Try again."; }
   $("finalBtn").disabled = false;
 };
-$("doneSupport").onclick = () => { $("doneMsg").textContent = "Support chat comes in the next step."; };
+$("doneSupport").onclick = () => openSupport();
+function openSupport(){
+  const uid = auth.currentUser.uid;
+  show("support");
+  if (unsubChat) unsubChat();
+  unsubChat = onSnapshot(query(collection(db, "chats", uid, "messages"), orderBy("createdAt")), snap => {
+    const box = $("msgs");
+    box.innerHTML = snap.empty ? '<div class="meta">Write your question and we will reply here.</div>' : "";
+    snap.docs.forEach(d => { const x = d.data(), b = document.createElement("div"); b.className = "b" + (x.from === "user" ? " me" : ""); b.textContent = x.text; box.appendChild(b); });
+    box.scrollTop = box.scrollHeight;
+  });
+}
+$("msgSend").onclick = async () => {
+  const t = $("msgIn").value.trim(); if (!t) return;
+  $("msgIn").value = ""; const u = auth.currentUser;
+  try {
+    await addDoc(collection(db, "chats", u.uid, "messages"), { from: "user", text: t.slice(0, 1000), createdAt: serverTimestamp() });
+    await setDoc(doc(db, "chats", u.uid), { uid: u.uid, username: meProfile.username || "", lastAt: serverTimestamp(), lastFrom: "user" }, { merge: true });
+  } catch (e) { $("msgIn").value = t; }
+};
+$("msgIn").onkeydown = e => { if (e.key === "Enter") $("msgSend").click(); };
 $("doneHome").onclick = () => loadHome(auth.currentUser);
 </script>
 </body>
