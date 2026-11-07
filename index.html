@@ -33,6 +33,11 @@ button{font:inherit;cursor:pointer;border-radius:10px;padding:13px 16px;border:1
 .txt p{margin:0 0 12px}.txt h3{font-size:17px;margin:20px 0 4px}.txt .sub{color:var(--mute)}
 button:disabled{opacity:.45;cursor:not-allowed}
 .chk{text-align:left;background:transparent;color:var(--ink);border-color:var(--line)}.chk.on{border-color:var(--accent);background:var(--line)}
+body{padding-bottom:80px}
+.bar{position:fixed;left:0;right:0;bottom:0;padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));background:var(--accent);color:var(--accent-ink);display:flex;justify-content:space-between;align-items:center;cursor:pointer;z-index:5}
+.bar b{font-weight:normal}
+.sz{display:grid;grid-template-columns:1fr 1fr;gap:10px}.sz button{margin:0}
+.row2{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
 </style>
 </head>
 <body>
@@ -144,7 +149,69 @@ button:disabled{opacity:.45;cursor:not-allowed}
   <div id="itemList"></div>
 </div>
 
+<!-- CART -->
+<div id="cart" class="hidden">
+  <button class="link" data-back="tiles">Keep browsing</button>
+  <h1>Your cart</h1>
+  <div class="card">
+    <div id="cartList"></div>
+    <div class="row2"><strong>Total size</strong><strong id="cartGb"></strong></div>
+    <div class="row2"><strong>Total cost</strong><strong id="cartPrice"></strong></div>
+    <button class="primary" id="buyNow">Buy Now</button>
+  </div>
 </div>
+
+<!-- DEVICE TYPE -->
+<div id="device" class="hidden">
+  <button class="link" data-back="cart">Back</button>
+  <h1>Where do you want your files?</h1>
+  <button class="tile" data-type="SD Card">Mobile (SD Card)</button>
+  <button class="tile" data-type="Pen Drive">PC / Laptop (Pen Drive)</button>
+</div>
+
+<!-- SIZE -->
+<div id="sizes" class="hidden">
+  <button class="link" data-back="device">Back</button>
+  <h1 id="sizeTitle"></h1>
+  <p class="sub" id="sizeSub"></p>
+  <div class="sz" id="sizeList"></div>
+</div>
+
+<!-- REUSE -->
+<div id="reuse" class="hidden">
+  <h1>Use your previous device?</h1>
+  <div class="card">
+    <p id="reuseText"></p>
+    <button class="primary" id="reuseYes">Continue with the same one</button>
+    <button class="ghost" id="reuseNo">Buy a new one</button>
+  </div>
+</div>
+
+<!-- FINALIZE -->
+<div id="final" class="hidden">
+  <button class="link" data-back="device">Back</button>
+  <h1>Review and finalize</h1>
+  <div class="card">
+    <div id="finalInfo"></div>
+    <div class="err" id="finalErr"></div>
+    <button class="primary" id="finalBtn">Finalize</button>
+  </div>
+</div>
+
+<!-- DONE -->
+<div id="done" class="hidden">
+  <h1>Order placed</h1>
+  <div class="card">
+    <p>Your order has been received. Contact our Support Team about your storage device, pricing and delivery.</p>
+    <button class="primary" id="doneSupport">Support</button>
+    <button class="ghost" id="doneHome">Go to Home</button>
+    <div class="err" id="doneMsg" style="color:var(--mute)"></div>
+  </div>
+</div>
+
+</div>
+
+<div class="bar hidden" id="bar"><span id="barText"></span><b>View cart ▴</b></div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
@@ -163,8 +230,9 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+var curScreen = "";
 const $ = id => document.getElementById(id);
-const show = id => { for (const s of ["loading","auth","home","unlock","form","tiles","items"]) $(s).classList.toggle("hidden", s !== id); };
+const show = id => { for (const s of ["loading","auth","home","unlock","form","tiles","items","cart","device","sizes","reuse","final","done"]) $(s).classList.toggle("hidden", s !== id); curScreen = id; updateBar(); window.scrollTo(0, 0); };
 let signup = false;
 let creating = false; // true while signup is writing the profile
 
@@ -334,9 +402,101 @@ function renderItems(){
       ratings = ratings.filter(r => !(r.itemId === i.id && r.uid === uid)).concat({ itemId: i.id, catalogue: curCat, uid, value });
       renderItems();
     });
+    const cb = document.createElement("button");
+    cb.className = inCart(i.id) ? "ghost" : "primary";
+    cb.textContent = inCart(i.id) ? "Remove from cart" : "Add to cart";
+    cb.onclick = () => { toggleCart(i); renderItems(); };
+    el.appendChild(cb);
     $("itemList").appendChild(el);
   });
 }
+
+// ===== Part 2: cart, device choice, finalize =====
+const SIZES = [4, 8, 16, 32, 64, 128, 256, 512, 1024];
+let cart = [], flow = { type: "", size: 0, newDevice: true }, prof = {};
+const num = v => parseFloat(String(v).replace(/[^0-9.]/g, "")) || 0;
+const toGb = v => { const m = String(v).match(/([\d.]+)\s*(TB|GB|MB|KB)?/i); if (!m) return 0; const n = parseFloat(m[1]) || 0, u = (m[2] || "GB").toUpperCase(); return u === "TB" ? n * 1024 : u === "MB" ? n / 1024 : u === "KB" ? n / 1048576 : n; };
+const fmtGb = n => (Math.round(n * 100) / 100) + " GB";
+const fmtSize = n => n >= 1024 ? (n / 1024) + " TB" : n + " GB";
+const cur = () => (String(cart[0]?.price || "").match(/^[^\d.]*/) || [""])[0].trim();
+const money = n => cur() + (Math.round(n * 100) / 100);
+const totals = () => ({ gb: cart.reduce((a, i) => a + toGb(i.size), 0), price: cart.reduce((a, i) => a + num(i.price), 0) });
+const inCart = id => cart.some(i => i.id === id);
+function toggleCart(i){ cart = inCart(i.id) ? cart.filter(x => x.id !== i.id) : cart.concat(i); updateBar(); }
+function updateBar(){
+  const on = cart.length && ["tiles", "items"].includes(curScreen);
+  $("bar").classList.toggle("hidden", !on);
+  if (cart.length) { const t = totals(); $("barText").textContent = `${cart.length} item${cart.length > 1 ? "s" : ""} · ${fmtGb(t.gb)} · ${money(t.price)}`; }
+}
+$("bar").onclick = openCart;
+
+function openCart(){
+  if (!cart.length) { show("tiles"); return; }
+  $("cartList").innerHTML = "";
+  cart.forEach(i => {
+    const r = document.createElement("div"); r.className = "row2"; r.style.alignItems = "center";
+    r.innerHTML = `<div><div>${esc(i.catalogue)} · ${esc((i.caption || "Item").slice(0, 40))}</div><div class="meta">${esc(i.size)} · ${esc(i.price)}</div></div><button class="ghost" style="width:auto;margin:0">Remove</button>`;
+    r.querySelector("button").onclick = () => { toggleCart(i); openCart(); };
+    $("cartList").appendChild(r);
+  });
+  const t = totals(); $("cartGb").textContent = fmtGb(t.gb); $("cartPrice").textContent = money(t.price);
+  show("cart");
+}
+
+$("buyNow").onclick = async () => {
+  try { prof = (await getDoc(doc(db, "users", auth.currentUser.uid))).data() || {}; } catch (e) { prof = {}; }
+  show("device");
+};
+document.querySelectorAll("[data-type]").forEach(b => b.onclick = () => {
+  flow.type = b.dataset.type; flow.newDevice = true;
+  const need = totals().gb;
+  $("sizeTitle").textContent = "Choose your " + flow.type + " size";
+  $("sizeSub").textContent = "Your selection is " + fmtGb(need) + ". Sizes that are too small are unavailable.";
+  $("sizeList").innerHTML = "";
+  SIZES.forEach(sz => {
+    const bt = document.createElement("button"); bt.className = "ghost"; bt.textContent = fmtSize(sz);
+    bt.disabled = sz < need; bt.onclick = () => pickSize(sz);
+    $("sizeList").appendChild(bt);
+  });
+  show("sizes");
+});
+function pickSize(sz){
+  flow.size = sz; flow.newDevice = true;
+  if (prof.deviceType === flow.type && prof.deviceSize && sz <= prof.deviceSize) {
+    $("reuseText").textContent = `You bought a ${fmtSize(prof.deviceSize)} ${flow.type} before, and your selection (${fmtGb(totals().gb)}) fits on it. Continue with it, or buy a new one?`;
+    show("reuse"); return;
+  }
+  openFinal();
+}
+$("reuseYes").onclick = () => { flow.size = prof.deviceSize; flow.newDevice = false; openFinal(); };
+$("reuseNo").onclick = () => { flow.newDevice = true; openFinal(); };
+
+function openFinal(){
+  const t = totals();
+  $("finalInfo").innerHTML = `<div class="row2"><span>Items</span><strong>${cart.length}</strong></div>
+    <div class="row2"><span>Total size</span><strong>${fmtGb(t.gb)}</strong></div>
+    <div class="row2"><span>Total cost</span><strong>${money(t.price)}</strong></div>
+    <div class="row2"><span>Storage</span><strong>${esc(flow.type)} · ${fmtSize(flow.size)} (${flow.newDevice ? "new" : "your previous one"})</strong></div>`;
+  $("finalErr").textContent = ""; show("final");
+}
+$("finalBtn").onclick = async () => {
+  $("finalBtn").disabled = true;
+  try {
+    const u = auth.currentUser, t = totals();
+    await addDoc(collection(db, "orders"), {
+      uid: u.uid, username: prof.username || "", name: prof.name || "", email: u.email,
+      items: cart.map(i => ({ id: i.id, catalogue: i.catalogue, caption: i.caption || "", size: i.size, price: i.price })),
+      totalGb: Math.round(t.gb * 100) / 100, totalPrice: t.price,
+      deviceType: flow.type, deviceSize: flow.size, newDevice: flow.newDevice,
+      status: "pending", createdAt: serverTimestamp()
+    });
+    await setDoc(doc(db, "users", u.uid), { status: "in_progress", deviceType: flow.type, deviceSize: flow.size }, { merge: true });
+    cart = []; show("done");
+  } catch (e) { $("finalErr").textContent = "Could not place the order. Try again."; }
+  $("finalBtn").disabled = false;
+};
+$("doneSupport").onclick = () => { $("doneMsg").textContent = "Support chat comes in the next step."; };
+$("doneHome").onclick = () => loadHome(auth.currentUser);
 </script>
 </body>
 </html>
