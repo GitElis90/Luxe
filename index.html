@@ -37,6 +37,7 @@ body{padding-bottom:80px}
 .bar{position:fixed;left:0;right:0;bottom:0;padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));background:var(--accent);color:var(--accent-ink);display:flex;justify-content:space-between;align-items:center;cursor:pointer;z-index:5}
 .bar b{font-weight:normal}
 .bar.hidden{display:none}
+.notice{background:var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
 .sz{display:grid;grid-template-columns:1fr 1fr;gap:10px}.sz button{margin:0}
 .row2{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
 </style>
@@ -82,6 +83,7 @@ body{padding-bottom:80px}
       <p><strong>Explore. Choose. Own the Experience.</strong></p>
       <p>Your access to exclusivity begins here.</p>
     </div>
+    <div id="orderMsg" class="hidden"></div>
     <button class="primary" id="unlockBtn">Unlock the Experience</button>
     <button class="ghost" id="supportBtn">Contact support</button>
     <div class="err" id="homeMsg" style="color:var(--mute)"></div>
@@ -231,9 +233,9 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-var curScreen = "";
+var curScreen = "", lock = "none";
 const $ = id => document.getElementById(id);
-const show = id => { for (const s of ["loading","auth","home","unlock","form","tiles","items","cart","device","sizes","reuse","final","done"]) $(s).classList.toggle("hidden", s !== id); curScreen = id; updateBar(); window.scrollTo(0, 0); };
+const show = id => { if (lock === "in_progress" && !["home","loading","auth","done"].includes(id)) id = "home"; for (const s of ["loading","auth","home","unlock","form","tiles","items","cart","device","sizes","reuse","final","done"]) $(s).classList.toggle("hidden", s !== id); curScreen = id; updateBar(); window.scrollTo(0, 0); };
 let signup = false;
 let creating = false; // true while signup is writing the profile
 
@@ -292,11 +294,26 @@ $("authBtn").onclick = async () => {
 
 async function loadHome(user){
   const snap = await getDoc(doc(db, "users", user.uid));
-  const d = snap.exists() ? snap.data() : { name: "there", username: "" };
+  const d = snap.exists() ? snap.data() : { name: "there", username: "", status: "none" };
   $("hello").textContent = "Hi, " + d.name;
   $("uname").textContent = d.username ? "@" + d.username : "";
+  const m = $("orderMsg");
+  m.className = "hidden"; $("unlockBtn").classList.remove("hidden");
+  lock = d.status === "in_progress" ? "in_progress" : "none";
+  if (lock === "in_progress") {
+    m.innerHTML = "<strong>Your order is in progress.</strong><br>We will update you here once it has been delivered. Contact Support if you need help.";
+    m.className = "notice"; $("unlockBtn").classList.add("hidden");
+    history.pushState({}, "", location.href);
+  } else if (d.status === "delivered") {
+    m.innerHTML = "<strong>Your order has been delivered.</strong><br>You can continue to buy again.";
+    m.className = "notice";
+    try { await setDoc(doc(db, "users", user.uid), { status: "none" }, { merge: true }); } catch (e) {}
+  }
   show("home");
 }
+addEventListener("popstate", () => {
+  if (lock === "in_progress" || curScreen === "done") { history.pushState({}, "", location.href); if (auth.currentUser) loadHome(auth.currentUser); }
+});
 
 onAuthStateChanged(auth, async user => {
   if (creating) return;
@@ -492,7 +509,7 @@ $("finalBtn").onclick = async () => {
       status: "pending", createdAt: serverTimestamp()
     });
     await setDoc(doc(db, "users", u.uid), { status: "in_progress", deviceType: flow.type, deviceSize: flow.size }, { merge: true });
-    cart = []; show("done");
+    cart = []; lock = "in_progress"; history.pushState({}, "", location.href); show("done");
   } catch (e) { $("finalErr").textContent = "Could not place the order. Try again."; }
   $("finalBtn").disabled = false;
 };
