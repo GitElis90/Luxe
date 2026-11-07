@@ -28,6 +28,7 @@ button.d{border-color:var(--err);color:var(--err)}
 .msg{min-height:20px;font-size:14px;margin-top:8px;color:var(--mute)}
 .hidden{display:none}
 .chips span{display:inline-block;border:1px solid var(--line);border-radius:20px;padding:2px 10px;font-size:13px;margin:4px 4px 0 0;cursor:pointer}
+.b{max-width:80%;padding:8px 12px;border-radius:12px;background:var(--line);overflow-wrap:anywhere}.b.me{align-self:flex-end;background:var(--accent);color:var(--accent-ink)}
 </style>
 </head>
 <body>
@@ -64,6 +65,15 @@ button.d{border-color:var(--err);color:var(--err)}
     <div class="tabs" id="tabs"></div>
     <div id="list"></div>
   </div>
+  <div class="card"><h2>Support chats</h2>
+    <div id="chatList"></div>
+    <div id="chatThread" class="hidden">
+      <button id="chatBack">Back to chats</button> <strong id="chatWho"></strong>
+      <div id="chatMsgs" style="display:flex;flex-direction:column;gap:8px;max-height:50vh;overflow:auto;margin:12px 0"></div>
+      <input id="chatIn" placeholder="Write a reply" maxlength="1000">
+      <button class="p" id="chatSend">Send reply</button>
+    </div>
+  </div>
   <div class="card"><h2>Orders</h2><button id="refO">Refresh</button><div id="orders"></div></div>
   <div class="card"><h2>Forms</h2><div id="forms"></div></div>
 </div>
@@ -72,7 +82,7 @@ button.d{border-color:var(--err);color:var(--err)}
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { getFirestore, collection, addDoc, setDoc, deleteDoc, doc, getDoc, getDocs, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { getFirestore, collection, addDoc, setDoc, deleteDoc, doc, getDoc, getDocs, query, orderBy, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 const ADMIN_EMAIL = "daemonhotd67@gmail.com";
 const CLOUD_NAME = "nl17lif3";
@@ -96,6 +106,7 @@ onAuthStateChanged(auth, async u => {
   $("gate").classList.add("hidden"); $("app").classList.remove("hidden");
   await load();
   loadExtra();
+  startChats();
 });
 
 async function load(){
@@ -219,6 +230,40 @@ async function loadExtra(){
     $("forms").appendChild(el);
   });
 }
+
+let openUid = null, unsubT = null;
+function startChats(){
+  onSnapshot(query(collection(db, "chats"), orderBy("lastAt", "desc")), snap => {
+    $("chatList").innerHTML = snap.empty ? '<div class="meta">No chats yet.</div>' : "";
+    snap.docs.forEach(d => {
+      const x = d.data(), b = document.createElement("button");
+      b.style.cssText = "display:block;width:100%;text-align:left";
+      b.textContent = (x.lastFrom === "user" ? "● " : "") + "@" + (x.username || "user");
+      b.onclick = () => openChat(d.id, x.username);
+      $("chatList").appendChild(b);
+    });
+  });
+}
+function openChat(uid, name){
+  openUid = uid; $("chatList").classList.add("hidden"); $("chatThread").classList.remove("hidden");
+  $("chatWho").textContent = "@" + (name || "user");
+  if (unsubT) unsubT();
+  unsubT = onSnapshot(query(collection(db, "chats", uid, "messages"), orderBy("createdAt")), snap => {
+    const box = $("chatMsgs"); box.innerHTML = "";
+    snap.docs.forEach(d => { const x = d.data(), b = document.createElement("div"); b.className = "b" + (x.from === "admin" ? " me" : ""); b.textContent = x.text; box.appendChild(b); });
+    box.scrollTop = box.scrollHeight;
+  });
+}
+$("chatBack").onclick = () => { if (unsubT) unsubT(); unsubT = null; openUid = null; $("chatThread").classList.add("hidden"); $("chatList").classList.remove("hidden"); };
+$("chatSend").onclick = async () => {
+  const t = $("chatIn").value.trim(); if (!t || !openUid) return;
+  $("chatIn").value = "";
+  try {
+    await addDoc(collection(db, "chats", openUid, "messages"), { from: "admin", text: t.slice(0, 1000), createdAt: serverTimestamp() });
+    await setDoc(doc(db, "chats", openUid), { lastAt: serverTimestamp(), lastFrom: "admin" }, { merge: true });
+  } catch (e) { $("chatIn").value = t; }
+};
+$("chatIn").onkeydown = e => { if (e.key === "Enter") $("chatSend").click(); };
 </script>
 </body>
 </html>
