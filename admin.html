@@ -29,6 +29,7 @@ button.d{border-color:var(--err);color:var(--err)}
 .hidden{display:none}
 .chips span{display:inline-block;border:1px solid var(--line);border-radius:20px;padding:2px 10px;font-size:13px;margin:4px 4px 0 0;cursor:pointer}
 .b{max-width:80%;padding:8px 12px;border-radius:12px;background:var(--line);overflow-wrap:anywhere}.b.me{align-self:flex-end;background:var(--accent);color:var(--accent-ink)}
+.dot{color:#e5484d}
 </style>
 </head>
 <body>
@@ -37,6 +38,13 @@ button.d{border-color:var(--err);color:var(--err)}
 <div id="gate" class="card">Checking access…</div>
 
 <div id="app" class="hidden">
+  <div class="tabs" id="nav" style="margin-bottom:14px">
+    <button data-s="items" class="on">Items</button>
+    <button data-s="chats">Chats <span class="dot hidden" id="dot-chats">●</span></button>
+    <button data-s="orders">Orders <span class="dot hidden" id="dot-orders">●</span></button>
+    <button data-s="forms">Forms <span class="dot hidden" id="dot-forms">●</span></button>
+  </div>
+  <div id="sec-items">
   <div class="card">
     <h2 id="formTitle">Add item</h2>
     <label for="cat">Catalogue</label>
@@ -65,6 +73,7 @@ button.d{border-color:var(--err);color:var(--err)}
     <div class="tabs" id="tabs"></div>
     <div id="list"></div>
   </div>
+  </div><div id="sec-chats" class="hidden">
   <div class="card"><h2>Support chats</h2>
     <div id="chatList"></div>
     <div id="chatThread" class="hidden">
@@ -74,8 +83,11 @@ button.d{border-color:var(--err);color:var(--err)}
       <button class="p" id="chatSend">Send reply</button>
     </div>
   </div>
+  </div><div id="sec-orders" class="hidden">
   <div class="card"><h2>Orders</h2><button id="refO">Refresh</button><div id="orders"></div></div>
+  </div><div id="sec-forms" class="hidden">
   <div class="card"><h2>Forms</h2><div id="forms"></div></div>
+  </div>
 </div>
 </div>
 
@@ -98,7 +110,8 @@ const app = initializeApp({
 });
 const auth = getAuth(app), db = getFirestore(app);
 const $ = id => document.getElementById(id);
-let items = [], editing = null, tab = "OF";
+let items = [], editing = null, tab = "OF", hiddenCats = [];
+async function saveHidden(){ await setDoc(doc(db, "settings", "adminChips"), { hidden: hiddenCats }).catch(() => {}); }
 
 onAuthStateChanged(auth, async u => {
   if (!u) { $("gate").innerHTML = 'Log in first on the <a href="/">main site</a>, then come back here.'; return; }
@@ -107,11 +120,14 @@ onAuthStateChanged(auth, async u => {
   await load();
   loadExtra();
   startChats();
+  onSnapshot(collection(db, "orders"), () => loadExtra());
+  onSnapshot(collection(db, "forms"), () => loadExtra());
 });
 
 async function load(){
   const snap = await getDocs(collection(db, "items"));
-  items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  items = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.seconds ?? 9e12) - (a.createdAt?.seconds ?? 9e12));
+  try { const h = await getDoc(doc(db, "settings", "adminChips")); hiddenCats = h.exists() ? (h.data().hidden || []) : []; } catch (e) {}
   render();
 }
 
@@ -131,11 +147,13 @@ function render(){
     el.querySelector("[data-d]").onclick = async () => { if (confirm("Delete this item?")) { await deleteDoc(doc(db,"items",i.id)); await deleteDoc(doc(db,"itemLinks",i.id)).catch(() => {}); await load(); } };
     $("list").appendChild(el);
   });
-  const all = [...new Set(items.flatMap(i => i.categories || []))].sort();
-  $("chips").innerHTML = all.map(c => `<span>${esc(c)}</span>`).join("");
-  $("chips").querySelectorAll("span").forEach(s => s.onclick = () => {
+  const all = [...new Set(items.flatMap(i => i.categories || []))].filter(c => !hiddenCats.includes(c));
+  $("chips").innerHTML = all.map(c => `<span data-c="${esc(c)}">${esc(c)} <b data-x title="Remove from this list (items keep it)" style="color:var(--err)">×</b></span>`).join("");
+  $("chips").querySelectorAll("span").forEach(sp => sp.onclick = async e => {
+    const c = sp.dataset.c;
+    if (e.target.dataset.x !== undefined) { hiddenCats = hiddenCats.concat(c); await saveHidden(); render(); return; }
     const cur = $("cats").value.split(",").map(x => x.trim()).filter(Boolean);
-    if (!cur.map(x=>x.toLowerCase()).includes(s.textContent.toLowerCase())) cur.push(s.textContent);
+    if (!cur.map(x => x.toLowerCase()).includes(c.toLowerCase())) cur.push(c);
     $("cats").value = cur.join(", ");
   });
 }
@@ -186,12 +204,24 @@ $("save").onclick = async () => {
     const link = $("plink").value.trim();
     if (link) await setDoc(doc(db, "itemLinks", itemId), { link });
     else await deleteDoc(doc(db, "itemLinks", itemId)).catch(() => {});
+    const known = new Set(items.flatMap(i => i.categories || []));
+    const fresh = categories.filter(c => !known.has(c));
+    if (hiddenCats.some(c => fresh.includes(c))) { hiddenCats = hiddenCats.filter(c => !fresh.includes(c)); await saveHidden(); }
     tab = data.catalogue; reset(); await load(); msg.textContent = "Saved.";
   } catch (e) { msg.textContent = e.message; }
   $("save").disabled = false;
 };
 
 $("refO").onclick = () => loadExtra();
+let curSec = "items", unseen = { orders: [], forms: [] }, newIds = new Set();
+function updateDots(){ ["orders", "forms"].forEach(k => $("dot-" + k).classList.toggle("hidden", !unseen[k].length || curSec === k)); }
+function markSeen(k){ unseen[k].splice(0).forEach(id => setDoc(doc(db, k, id), { seen: true }, { merge: true }).catch(() => {})); updateDots(); }
+document.querySelectorAll("#nav button").forEach(b => b.onclick = () => {
+  curSec = b.dataset.s;
+  document.querySelectorAll("#nav button").forEach(x => x.classList.toggle("on", x === b));
+  ["items", "chats", "orders", "forms"].forEach(n => $("sec-" + n).classList.toggle("hidden", n !== curSec));
+  if (curSec === "orders" || curSec === "forms") markSeen(curSec);
+});
 async function loadExtra(){
   const [o, f, l] = await Promise.all([
     getDocs(query(collection(db, "orders"), orderBy("createdAt", "desc"))),
@@ -199,10 +229,15 @@ async function loadExtra(){
     getDocs(collection(db, "itemLinks"))
   ]);
   const links = {}; l.docs.forEach(d => links[d.id] = d.data().link);
+  unseen.orders = o.docs.filter(d => !d.data().seen).map(d => d.id); unseen.orders.forEach(id => newIds.add(id));
+  unseen.forms = f.docs.filter(d => !d.data().seen).map(d => d.id); unseen.forms.forEach(id => newIds.add(id));
+  if (curSec === "orders") markSeen("orders");
+  if (curSec === "forms") markSeen("forms");
+  updateDots();
   $("orders").innerHTML = o.empty ? '<div class="meta">No orders yet.</div>' : "";
   o.docs.forEach(d => {
     const x = d.data(), el = document.createElement("div"); el.className = "item"; el.style.display = "block";
-    el.innerHTML = `<div><strong>@${esc(x.username)}</strong> · ${esc(x.name)} · ${esc(x.email)}</div>
+    el.innerHTML = `<div>${newIds.has(d.id) ? '<span class="dot">● NEW </span>' : ""}<strong>@${esc(x.username)}</strong> · ${esc(x.name)} · ${esc(x.email)}</div>
       <div class="meta">${(x.items || []).map(i => esc(i.catalogue) + ": " + esc((i.caption || "Item").slice(0, 30)) + " (" + esc(i.size) + ", " + esc(i.price) + ")" + (/^https?:\/\//i.test(links[i.id] || "") ? ` · <a href="${esc(links[i.id])}" target="_blank" rel="noopener">Open link</a>` : "")).join("<br>")}</div>
       <div class="meta">Total ${esc(x.totalGb)} GB · ${esc(x.totalPrice)} · ${esc(x.deviceType)} ${esc(x.deviceSize)} GB (${x.newDevice ? "new device" : "previous device"})</div>
       <div class="meta">Status: <strong>${esc(x.status)}</strong></div>`;
@@ -234,7 +269,7 @@ async function loadExtra(){
   $("forms").innerHTML = f.empty ? '<div class="meta">No forms yet.</div>' : "";
   f.docs.forEach(d => {
     const x = d.data(), el = document.createElement("div"); el.className = "item"; el.style.display = "block";
-    el.innerHTML = `<div><strong>@${esc(x.username)}</strong></div>` + Object.values(x.answers || {}).filter(a => a.label !== "Confirmed accuracy").map(a => `<div class="meta">${esc(a.label)}: ${esc(a.value)}</div>`).join("");
+    el.innerHTML = `<div>${newIds.has(d.id) ? '<span class="dot">● NEW </span>' : ""}<strong>@${esc(x.username)}</strong></div>` + Object.values(x.answers || {}).filter(a => a.label !== "Confirmed accuracy").map(a => `<div class="meta">${esc(a.label)}: ${esc(a.value)}</div>`).join("");
     const del = document.createElement("button"); del.className = "d"; del.textContent = "Delete";
     del.onclick = async () => { if (!confirm("Delete this form?")) return; await deleteDoc(doc(db, "forms", d.id)); loadExtra(); };
     el.appendChild(del);
@@ -246,23 +281,26 @@ let openUid = null, unsubT = null;
 function startChats(){
   onSnapshot(query(collection(db, "chats"), orderBy("lastAt", "desc")), snap => {
     $("chatList").innerHTML = snap.empty ? '<div class="meta">No chats yet.</div>' : "";
+    $("dot-chats").classList.toggle("hidden", !snap.docs.some(d => d.data().adminUnread ?? d.data().lastFrom === "user"));
     snap.docs.forEach(d => {
       const x = d.data(), b = document.createElement("button");
       b.style.cssText = "display:block;width:100%;text-align:left";
-      b.textContent = (x.lastFrom === "user" ? "● " : "") + "@" + (x.username || "user");
+      b.textContent = ((x.adminUnread ?? x.lastFrom === "user") ? "● " : "") + "@" + (x.username || "user");
       b.onclick = () => openChat(d.id, x.username);
       $("chatList").appendChild(b);
     });
   });
 }
 function openChat(uid, name){
-  openUid = uid; $("chatList").classList.add("hidden"); $("chatThread").classList.remove("hidden");
+  openUid = uid; setDoc(doc(db, "chats", uid), { adminUnread: false }, { merge: true }).catch(() => {}); $("chatList").classList.add("hidden"); $("chatThread").classList.remove("hidden");
   $("chatWho").textContent = "@" + (name || "user");
   if (unsubT) unsubT();
   unsubT = onSnapshot(query(collection(db, "chats", uid, "messages"), orderBy("createdAt")), snap => {
     const box = $("chatMsgs"); box.innerHTML = "";
     snap.docs.forEach(d => { const x = d.data(), b = document.createElement("div"); b.className = "b" + (x.from === "admin" ? " me" : ""); b.textContent = x.text; box.appendChild(b); });
     box.scrollTop = box.scrollHeight;
+    const last = snap.docs[snap.docs.length - 1];
+    if (last && last.data().from === "user") setDoc(doc(db, "chats", uid), { adminUnread: false }, { merge: true }).catch(() => {});
   });
 }
 $("chatBack").onclick = () => { if (unsubT) unsubT(); unsubT = null; openUid = null; $("chatThread").classList.add("hidden"); $("chatList").classList.remove("hidden"); };
