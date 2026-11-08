@@ -150,7 +150,6 @@ body{padding-bottom:80px}
   <button class="link" data-back="tiles">Back to catalogues</button>
   <h1 id="catTitle"></h1>
   <input id="q" placeholder="Search by category">
-  <div class="chips" id="chips"></div>
   <div id="itemList"></div>
 </div>
 
@@ -414,7 +413,7 @@ document.querySelectorAll("[data-cat]").forEach(b => b.onclick = async () => {
     getDocs(query(collection(db, "items"), where("catalogue", "==", curCat))),
     getDocs(query(collection(db, "ratings"), where("catalogue", "==", curCat)))
   ]);
-  curItems = i.docs.map(d => ({ id: d.id, ...d.data() }));
+  curItems = i.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.seconds ?? 9e12) - (a.createdAt?.seconds ?? 9e12));
   ratings = r.docs.map(d => d.data());
   renderItems();
 });
@@ -422,9 +421,6 @@ $("q").oninput = renderItems;
 
 function renderItems(){
   const q = $("q").value.trim().toLowerCase();
-  const all = [...new Set(curItems.flatMap(i => i.categories || []))].sort();
-  $("chips").innerHTML = all.filter(c => c.includes(q) && c !== q).map(c => `<button class="chip">${esc(c)}</button>`).join("");
-  $("chips").querySelectorAll(".chip").forEach(b => b.onclick = () => { $("q").value = b.textContent; renderItems(); });
   const uid = auth.currentUser.uid;
   const list = curItems.filter(i => !q || (i.categories || []).some(c => c.includes(q)));
   $("itemList").innerHTML = list.length ? "" : '<div class="meta">Nothing found.</div>';
@@ -452,7 +448,7 @@ function renderItems(){
 }
 
 // ===== Part 2: cart, device choice, finalize =====
-const DEVICE_NOTICE = `<div class="notice" style="margin-top:14px"><p>An SD Card or Pen Drive is required for physical content delivery. Customers must pay the storage device cost in advance, before order processing begins, if purchasing through LuxeFlow. Alternatively, you may arrange your own compatible storage device.</p><p style="margin:0">To learn more about device pricing, purchasing options, and delivery arrangements, please contact our Support Team after placing your order.</p></div>`;
+const DEVICE_NOTICE = `<div class="notice" style="margin-top:14px"><p>The SD Card/Pen Drive cost is separate from the content price. If purchased through LuxeFlow, it must be paid in advance before order processing begins. You may also arrange your own device.</p><p>The content payment must be made in full, in cash, at the time of delivery without fail.</p><p style="margin:0">To learn more about device pricing, purchasing options, and delivery arrangements, please contact our Support Team after finalizing your order.</p></div>`;
 const SIZES = [4, 8, 16, 32, 64, 128, 256, 512, 1024];
 let cart = [], flow = { type: "", size: 0, newDevice: true }, prof = {};
 const num = v => parseFloat(String(v).replace(/[^0-9.]/g, "")) || 0;
@@ -563,7 +559,7 @@ $("msgSend").onclick = async () => {
   $("msgIn").value = ""; const u = auth.currentUser;
   try {
     await addDoc(collection(db, "chats", u.uid, "messages"), { from: "user", text: t.slice(0, 1000), createdAt: serverTimestamp() });
-    await setDoc(doc(db, "chats", u.uid), { uid: u.uid, username: meProfile.username || "", lastAt: serverTimestamp(), lastFrom: "user" }, { merge: true });
+    await setDoc(doc(db, "chats", u.uid), { uid: u.uid, username: meProfile.username || "", lastAt: serverTimestamp(), lastFrom: "user", adminUnread: true }, { merge: true });
   } catch (e) { $("msgIn").value = t; }
 };
 $("msgIn").onkeydown = e => { if (e.key === "Enter") $("msgSend").click(); };
