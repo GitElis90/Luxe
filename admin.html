@@ -184,9 +184,6 @@ async function upload(file){
   const r = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, { method: "POST", body: fd });
   const j = await r.json();
   if (!j.secure_url) throw new Error(j.error?.message || "Photo upload failed");
-  const flagged = (j.moderation || []).find(m => m.status === "rejected");
-  if (flagged) throw new Error("Cloudinary flagged this photo (" + (flagged.kind || "moderation") + "). It was NOT added to the item. Open your Cloudinary Media Library, review it, and delete it if needed.");
-  if ((j.moderation || []).some(m => m.status === "pending")) alert("This photo is waiting for moderation review in your Cloudinary Media Library.");
   return j.secure_url;
 }
 
