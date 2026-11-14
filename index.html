@@ -140,9 +140,7 @@ body{padding-bottom:80px}
 <!-- CATALOGUE TILES -->
 <div id="tiles" class="hidden">
   <h1>Choose a catalogue</h1>
-  <button class="tile" data-cat="OF">OF</button>
-  <button class="tile" data-cat="CORE">CORE</button>
-  <button class="tile" data-cat="PRIME">PRIME</button>
+  <div id="tileList"></div>
 </div>
 
 <!-- ITEMS -->
@@ -176,9 +174,28 @@ body{padding-bottom:80px}
   </div>
 </div>
 
+<!-- DELIVERY MODE -->
+<div id="mode" class="hidden">
+  <button class="link" data-back="cart">Back</button>
+  <h1>How do you want your content?</h1>
+  <button class="tile" id="modePhys">Physical Device (SD Card/Pen Drive)</button>
+  <button class="tile" id="modeVirt">Virtual Device (Telegram)</button>
+</div>
+
+<!-- OF -->
+<div id="of" class="hidden">
+  <button class="link" data-back="tiles">Back to catalogues</button>
+  <h1>OF</h1>
+  <div class="card">
+    <div id="ofText" style="white-space:pre-wrap"></div>
+    <button class="primary" id="ofUnlock"></button>
+    <button class="ghost" id="ofSupport"></button>
+  </div>
+</div>
+
 <!-- DEVICE TYPE -->
 <div id="device" class="hidden">
-  <button class="link" data-back="cart">Back</button>
+  <button class="link" data-back="mode">Back</button>
   <h1>Where do you want your files?</h1>
   <button class="tile" data-type="SD Card">Mobile (SD Card)</button>
   <button class="tile" data-type="Pen Drive">PC / Laptop (Pen Drive)</button>
@@ -204,7 +221,7 @@ body{padding-bottom:80px}
 
 <!-- FINALIZE -->
 <div id="final" class="hidden">
-  <button class="link" data-back="device">Back</button>
+  <button class="link" id="finalBack">Back</button>
   <h1>Review and finalize</h1>
   <div class="card">
     <div id="finalInfo"></div>
@@ -217,7 +234,8 @@ body{padding-bottom:80px}
 <div id="done" class="hidden">
   <h1>Order placed</h1>
   <div class="card">
-    <p>Your order has been received. Contact our Support Team about your storage device, pricing and delivery.</p>
+    <p id="doneText">Your order has been received. Contact our Support Team about your storage device, pricing and delivery.</p>
+    <button class="primary hidden" id="doneTg">Open Telegram</button>
     <button class="primary" id="doneSupport">Support<span class="sdot hidden"> ●</span></button>
     <button class="ghost" id="doneHome">Go to Home</button>
     <div class="err" id="doneMsg" style="color:var(--mute)"></div>
@@ -247,8 +265,8 @@ const db = getFirestore(app);
 
 var curScreen = "", lock = "none", unsubChat = null, meProfile = {}, popping = false, replaceNext = false, unsubDot = null, dotOn = false;
 const $ = id => document.getElementById(id);
-const show = id => { if (id !== "support" && unsubChat) { unsubChat(); unsubChat = null; } if (lock === "in_progress" && !["home","loading","auth","done","support"].includes(id)) id = "home"; for (const s of ["loading","auth","home","unlock","form","tiles","items","cart","device","sizes","reuse","final","done","support"]) $(s).classList.toggle("hidden", s !== id); if (!popping && id !== curScreen && id !== "loading" && id !== "auth") { if (replaceNext) history.replaceState({ s: id }, "", location.href); else history.pushState({ s: id }, "", location.href); replaceNext = false; }
- curScreen = id; updateBar(); window.scrollTo(0, 0); };
+const show = id => { if (id !== "support" && unsubChat) { unsubChat(); unsubChat = null; } if (lock === "in_progress" && !["home","loading","auth","done","support"].includes(id)) id = "home"; for (const s of ["loading","auth","home","unlock","form","tiles","items","cart","device","sizes","reuse","final","done","support","mode","of"]) $(s).classList.toggle("hidden", s !== id); if (!popping && id !== curScreen && id !== "loading" && id !== "auth") { if (replaceNext) history.replaceState({ s: id }, "", location.href); else history.pushState({ s: id }, "", location.href); replaceNext = false; }
+ curScreen = id; updateBar(); window.scrollTo(0, 0); if (id === "tiles") renderTiles(); };
 let signup = false;
 let creating = false; // true while signup is writing the profile
 
@@ -406,8 +424,10 @@ $("submitForm").onclick = async () => {
   $("submitForm").disabled = false;
 };
 
-document.querySelectorAll("[data-cat]").forEach(b => b.onclick = async () => {
-  curCat = b.dataset.cat; $("catTitle").textContent = curCat; $("q").value = "";
+async function openCat(c){
+  if (c === "OF") { openOF(); return; }
+  if (c === "CORE" || c === "PRIME") { seen[c] = Date.now() / 1000; setDoc(doc(db, "users", auth.currentUser.uid), { ["seen" + c]: serverTimestamp() }, { merge: true }).catch(() => {}); }
+  curCat = c; $("catTitle").textContent = curCat; $("q").value = "";
   $("itemList").textContent = "Loading…"; show("items");
   const [i, r] = await Promise.all([
     getDocs(query(collection(db, "items"), where("catalogue", "==", curCat))),
@@ -416,7 +436,7 @@ document.querySelectorAll("[data-cat]").forEach(b => b.onclick = async () => {
   curItems = i.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.seconds ?? 9e12) - (a.createdAt?.seconds ?? 9e12));
   ratings = r.docs.map(d => d.data());
   renderItems();
-});
+}
 $("q").oninput = renderItems;
 
 function renderItems(){
@@ -449,6 +469,7 @@ function renderItems(){
 
 // ===== Part 2: cart, device choice, finalize =====
 const DEVICE_NOTICE = `<div class="notice" style="margin-top:14px"><p>The SD Card/Pen Drive cost is separate from the content price. If purchased through LuxeFlow, it must be paid in advance before order processing begins. You may also arrange your own device.</p><p>The content payment must be made in full, in cash, at the time of delivery without fail.</p><p style="margin:0">To learn more about device pricing, purchasing options, and delivery arrangements, please contact our Support Team after finalizing your order.</p></div>`;
+const TG_NOTICE = `<div class="notice" style="margin-top:14px"><p>To receive your selected content via Telegram, click "Open Telegram" after finalizing your order and follow the instructions.</p><p>Full payment must be made in cash in advance before your content is delivered.</p><p style="margin:0">For any queries or assistance, please contact our Support Team after finalizing your order.</p></div>`;
 const SIZES = [4, 8, 16, 32, 64, 128, 256, 512, 1024];
 let cart = [], flow = { type: "", size: 0, newDevice: true }, prof = {};
 const num = v => parseFloat(String(v).replace(/[^0-9.]/g, "")) || 0;
@@ -482,7 +503,7 @@ function openCart(){
 
 $("buyNow").onclick = async () => {
   try { prof = (await getDoc(doc(db, "users", auth.currentUser.uid))).data() || {}; } catch (e) { prof = {}; }
-  show("device");
+  show("mode");
 };
 document.querySelectorAll("[data-type]").forEach(b => b.onclick = () => {
   flow.type = b.dataset.type; flow.newDevice = true;
@@ -513,7 +534,7 @@ function openFinal(){
   $("finalInfo").innerHTML = `<div class="row2"><span>Items</span><strong>${cart.length}</strong></div>
     <div class="row2"><span>Total size</span><strong>${fmtGb(t.gb)}</strong></div>
     <div class="row2"><span>Total cost</span><strong>${money(t.price)}</strong></div>
-    <div class="row2"><span>Storage</span><strong>${esc(flow.type)} · ${fmtSize(flow.size)} (${flow.newDevice ? "new" : "your previous one"})</strong></div>` + (flow.newDevice ? DEVICE_NOTICE : "");
+    <div class="row2"><span>Storage</span><strong>${flow.type === "Telegram" ? "Telegram" : esc(flow.type) + " · " + fmtSize(flow.size) + " (" + (flow.newDevice ? "new" : "your previous one") + ")"}</strong></div>` + (flow.type === "Telegram" ? TG_NOTICE : flow.newDevice ? DEVICE_NOTICE : "");
   $("finalErr").textContent = ""; show("final");
 }
 $("finalBtn").onclick = async () => {
@@ -524,10 +545,13 @@ $("finalBtn").onclick = async () => {
       uid: u.uid, username: prof.username || "", name: prof.name || "", email: u.email,
       items: cart.map(i => ({ id: i.id, catalogue: i.catalogue, caption: i.caption || "", size: i.size, price: i.price })),
       totalGb: Math.round(t.gb * 100) / 100, totalPrice: t.price,
-      deviceType: flow.type, deviceSize: flow.size, newDevice: flow.newDevice,
+      deviceType: flow.type, deviceSize: flow.size, newDevice: flow.newDevice, delivery: flow.type === "Telegram" ? "telegram" : "physical",
       status: "pending", createdAt: serverTimestamp()
     });
-    await setDoc(doc(db, "users", u.uid), { status: "in_progress", deviceType: flow.type, deviceSize: flow.size }, { merge: true });
+    await setDoc(doc(db, "users", u.uid), flow.type === "Telegram" ? { status: "in_progress" } : { status: "in_progress", deviceType: flow.type, deviceSize: flow.size }, { merge: true });
+    const tg = flow.type === "Telegram";
+    $("doneText").innerHTML = tg ? "<strong>Your Order Has Been Received!</strong><br><br>Click \"Open Telegram\" below and follow the instructions to proceed.<br><br>Please note: Full payment must be made in cash in advance before your selected content is delivered to your Telegram." : "Your order has been received. Contact our Support Team about your storage device, pricing and delivery.";
+    $("doneSupport").classList.toggle("hidden", tg); $("doneTg").classList.toggle("hidden", !tg);
     cart = []; lock = "in_progress"; history.pushState({}, "", location.href); show("done");
   } catch (e) { $("finalErr").textContent = "Could not place the order. Try again."; }
   $("finalBtn").disabled = false;
@@ -564,6 +588,39 @@ $("msgSend").onclick = async () => {
 };
 $("msgIn").onkeydown = e => { if (e.key === "Enter") $("msgSend").click(); };
 $("doneHome").onclick = () => loadHome(auth.currentUser);
+$("doneTg").onclick = () => window.open("https://t.me/Orderluxebot", "_blank", "noopener");
+$("modePhys").onclick = () => show("device");
+$("modeVirt").onclick = () => { flow.type = "Telegram"; flow.size = 0; flow.newDevice = false; openFinal(); };
+$("finalBack").onclick = () => show(flow.type === "Telegram" ? "mode" : "device");
+
+var seen = {};
+async function renderTiles(){
+  const uid = auth.currentUser && auth.currentUser.uid; if (!uid) return;
+  const [m1, m2, u] = await Promise.all([getDoc(doc(db, "catalogueMeta", "CORE")), getDoc(doc(db, "catalogueMeta", "PRIME")), getDoc(doc(db, "users", uid))]);
+  const ud = u.data() || {};
+  const at = m => m.exists() ? (m.data().lastAddedAt?.seconds ?? 9e12) : 0;
+  const meta = { CORE: at(m1), PRIME: at(m2) };
+  const sc = c => Math.max(ud["seen" + c]?.seconds ?? 0, seen[c] ?? 0);
+  const order = ["CORE", "PRIME"].sort((a, b) => meta[b] - meta[a]).concat("OF");
+  $("tileList").innerHTML = "";
+  order.forEach(c => {
+    const b = document.createElement("button"); b.className = "tile";
+    b.innerHTML = esc(c) + (c !== "OF" && meta[c] > sc(c) ? ' <span class="sdot">●</span>' : "");
+    b.onclick = () => openCat(c);
+    $("tileList").appendChild(b);
+  });
+}
+
+let ofData = { text: "", unlockLabel: "Unlock OF", unlockUrl: "https://t.me/+GM3Oh7_LHI0zOTdl", supportLabel: "Support" };
+async function openOF(){
+  try { const d = await getDoc(doc(db, "pages", "of")); if (d.exists()) ofData = { ...ofData, ...d.data() }; } catch (e) {}
+  $("ofText").textContent = ofData.text || "";
+  $("ofUnlock").textContent = ofData.unlockLabel || "Unlock OF";
+  $("ofSupport").textContent = ofData.supportLabel || "Support";
+  show("of");
+}
+$("ofUnlock").onclick = () => { if (/^https?:\/\//i.test(ofData.unlockUrl || "")) window.open(ofData.unlockUrl, "_blank", "noopener"); };
+$("ofSupport").onclick = () => openSupport();
 </script>
 </body>
 </html>
