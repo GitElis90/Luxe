@@ -220,9 +220,9 @@ $("save").onclick = async () => {
     if (link) await setDoc(doc(db, "itemLinks", itemId), { link });
     else await deleteDoc(doc(db, "itemLinks", itemId)).catch(() => {});
     if (!editing && ["CORE", "PRIME"].includes(data.catalogue)) await setDoc(doc(db, "catalogueMeta", data.catalogue), { lastAddedAt: serverTimestamp() });
-    const known = new Set(items.flatMap(i => i.categories || []));
-    const fresh = categories.filter(c => !known.has(c));
-    if (hiddenCats.some(c => fresh.includes(c))) { hiddenCats = hiddenCats.filter(c => !fresh.includes(c)); await saveHidden(); }
+    const before = editing ? (editing.categories || []) : [];
+    const added = categories.filter(c => !before.includes(c));
+    if (hiddenCats.some(c => added.includes(c))) { hiddenCats = hiddenCats.filter(c => !added.includes(c)); await saveHidden(); }
     tab = data.catalogue; reset(); await load(); msg.textContent = "Saved.";
   } catch (e) { msg.textContent = e.message; }
   $("save").disabled = false;
