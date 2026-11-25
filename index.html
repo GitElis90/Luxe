@@ -197,8 +197,8 @@ body{padding-bottom:80px}
 <div id="device" class="hidden">
   <button class="link" data-back="mode">Back</button>
   <h1>Where do you want your files?</h1>
-  <button class="tile" data-type="SD Card">Mobile (SD Card)</button>
-  <button class="tile" data-type="Pen Drive">PC / Laptop (Pen Drive)</button>
+  <button class="tile" data-type="SD Card">SD Card</button>
+  <button class="tile" data-type="Pen Drive">Pen Drive</button>
 </div>
 
 <!-- SIZE -->
@@ -470,6 +470,7 @@ function renderItems(){
 // ===== Part 2: cart, device choice, finalize =====
 const DEVICE_NOTICE = `<div class="notice" style="margin-top:14px"><p>The SD Card/Pen Drive cost is separate from the content price. If purchased through LuxeFlow, it must be paid in advance before order processing begins. You may also arrange your own device.</p><p>The content payment must be made in full, in cash, at the time of delivery without fail.</p><p style="margin:0">To learn more about device pricing, purchasing options, and delivery arrangements, please contact our Support Team after finalizing your order.</p></div>`;
 const TG_NOTICE = `<div class="notice" style="margin-top:14px"><p>To receive your selected content via Telegram, click "Open Telegram" after finalizing your order and follow the instructions.</p><p>Full payment must be made in cash in advance before your content is delivered.</p><p style="margin:0">For any queries or assistance, please contact our Support Team after finalizing your order.</p></div>`;
+const PAY_NOTICE = `<div class="notice" style="margin-top:14px"><p><strong>Payment &amp; Delivery Details</strong></p><p>For information regarding payment and delivery, including:</p><ul style="margin:0 0 12px;padding-left:20px"><li>Whom to pay, and where to make the payment</li><li>Whom to hand your SD Card/Pen Drive to</li><li>Who will deliver your SD Card/Pen Drive</li><li>Any other payment or delivery queries</li></ul><p style="margin:0">please contact our Support Team after finalizing your order.</p></div>`;
 const SIZES = [4, 8, 16, 32, 64, 128, 256, 512, 1024];
 let cart = [], flow = { type: "", size: 0, newDevice: true }, prof = {};
 const num = v => parseFloat(String(v).replace(/[^0-9.]/g, "")) || 0;
@@ -534,7 +535,7 @@ function openFinal(){
   $("finalInfo").innerHTML = `<div class="row2"><span>Items</span><strong>${cart.length}</strong></div>
     <div class="row2"><span>Total size</span><strong>${fmtGb(t.gb)}</strong></div>
     <div class="row2"><span>Total cost</span><strong>${money(t.price)}</strong></div>
-    <div class="row2"><span>Storage</span><strong>${flow.type === "Telegram" ? "Telegram" : esc(flow.type) + " · " + fmtSize(flow.size) + " (" + (flow.newDevice ? "new" : "your previous one") + ")"}</strong></div>` + (flow.type === "Telegram" ? TG_NOTICE : flow.newDevice ? DEVICE_NOTICE : "");
+    <div class="row2"><span>Storage</span><strong>${flow.type === "Telegram" ? "Telegram" : esc(flow.type) + " · " + fmtSize(flow.size) + " (" + (flow.newDevice ? "new" : "your previous one") + ")"}</strong></div>` + (flow.type === "Telegram" ? TG_NOTICE : (flow.newDevice ? DEVICE_NOTICE : "") + PAY_NOTICE);
   $("finalErr").textContent = ""; show("final");
 }
 $("finalBtn").onclick = async () => {
